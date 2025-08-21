@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1,  minimal-ui, user-scalable=no, interactive-widget=resizes-content"
+    />
+    <meta
+      name="mobile-web-app-capable"
+      content="yes"
+    />
+    <meta
+      name="apple-mobile-web-app-capable"
+      content="yes"
+    />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <title>test app</title>
+    <style>
+      body {
+        width: 100%;
+        background: #000000;
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        min-height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script
+      src="/src/main.ts"
+      type="module"
+    ></script>
+    <button
+      id="connect"
+      onclick="connect()"
+    >
+      connect
+    </button>
+
+    <button
+      id="sign"
+      style="display: none"
+      onclick="sign()"
+    >
+      sign
+    </button>
+  </body>
+</html>
