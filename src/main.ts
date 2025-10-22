@@ -1,4 +1,4 @@
-import { sendTransaction, checkTestnet, getAccountInfo } from "./metamask/secret";
+import { sendTransaction, checkTestnet, getAccountInfo } from "./metamask/nolus";
 
 // 🎉 WORKING NETWORK INTEGRATION
 // Key insight: JSON key ordering matters! "amount" must come before "denom"
@@ -24,7 +24,7 @@ export async function connect() {
       console.log("   📍 Your address:", accountInfo.address);
     }
 
-    await sendTransaction("neutron1ql007sqkh2748mvapj5pvzeydrtn9l9hnzsxp5", "1", "test");
+    await sendTransaction("nolus1tuw962yeqtmzf77wze88htxsff2pltqkmjqa56", "1", "test");
 
     return {
       success: true,

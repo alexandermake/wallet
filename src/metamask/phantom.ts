@@ -12,8 +12,8 @@ import { hashMessage, hexlify, SigningKey, toUtf8Bytes, getBytes } from "ethers"
 import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
 
 const CONFIG = {
-  rpc: "https://rila-rpc.nolus.network",
-  chainId: "rila-3",
+  rpc: "http://localhost:26612",
+  chainId: "nolus-local-v0.8.0-16-1756113007",
   addressPrefix: "nolus",
   denom: "unls",
   faucetUrl: ""

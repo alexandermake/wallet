@@ -1,36 +1,36 @@
 import * as bech32 from "bech32";
 import { sha256 as shaNoble } from "@noble/hashes/sha256";
-import { TxBody, AuthInfo, TxRaw, SignDoc, SignerInfo, ModeInfo, Fee } from "cosmjs-types/cosmos/tx/v1beta1/tx";
-import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
+import { TxBody, AuthInfo, TxRaw, SignDoc } from "cosmjs-types/cosmos/tx/v1beta1/tx";
 import { PubKey as Ed25519PubKey } from "cosmjs-types/cosmos/crypto/ed25519/keys";
 import { MsgSend } from "cosmjs-types/cosmos/bank/v1beta1/tx";
-import { toBase64, toHex, fromBase64 } from "@cosmjs/encoding";
+import { Fee } from "cosmjs-types/cosmos/tx/v1beta1/tx";
+import { toBase64, toHex, fromHex, fromBase64 } from "@cosmjs/encoding";
 import { StargateClient } from "@cosmjs/stargate";
+import { SignerInfo, ModeInfo } from "cosmjs-types/cosmos/tx/v1beta1/tx";
+import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
 
-// ---------------- Phantom typings ----------------
-type PhantomProvider = {
-  isPhantom?: boolean;
-  publicKey?: { toBytes(): Uint8Array; toBase58(): string };
-  isConnected?: boolean;
-  connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: any }>;
-  disconnect(): Promise<void>;
-  signMessage(message: Uint8Array): Promise<{ signature: Uint8Array; publicKey: any }>;
-};
-
+// Extend Window for Phantom and global functions
 declare global {
   interface Window {
-    phantom?: { solana?: PhantomProvider };
-    solana?: PhantomProvider;
-    // Global helpers (same names as your Solflare version)
+    phantom?: {
+      solana: {
+        isPhantom: boolean;
+        connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: any }>;
+        disconnect(): Promise<void>;
+        signMessage(message: Uint8Array, display?: "utf8" | "hex"): Promise<{ signature: Uint8Array; publicKey: any }>;
+        publicKey?: any; // Populated after connect()
+        isConnected?: boolean;
+      };
+    };
+    // Global functions to avoid TS errors
     connect: () => Promise<any>;
     testTransaction: () => Promise<any>;
     sendTransaction: (toAddress?: string, amountStr?: string, memo?: string) => Promise<any>;
     checkPhantomWallet: () => boolean;
-    sign: () => Promise<any>;
+    sign: () => Promise<any>; // For quick test
   }
 }
 
-// ---------------- Config ----------------
 const CONFIG = {
   rpc: "https://rpc.nolus.network",
   chainId: "pirin-1",
@@ -38,31 +38,14 @@ const CONFIG = {
   denom: "unls"
 };
 
-// ---------------- Provider helpers ----------------
-function getPhantom(): PhantomProvider | undefined {
-  return window.phantom?.solana ?? window.solana;
-}
-
-export function checkPhantomWallet() {
-  const p = getPhantom();
-  console.log(p);
-  const ok = !!p?.isPhantom;
-  console.log(ok ? "✅ Phantom ready" : "❌ Install Phantom: https://phantom.app/");
-  return ok;
-}
-
-// ---------------- Address / account ----------------
 async function getAddress() {
-  const phantom = getPhantom();
-  if (!phantom?.isPhantom) {
-    throw new Error("Phantom wallet not found! Install from https://phantom.app/");
-  }
-
   console.log("Connecting to Phantom...");
   try {
-    // Prefer connect() without onlyIfTrusted on first run (will prompt)
-    const { publicKey } = await phantom.connect();
-    if (!publicKey) throw new Error("Connection failed—user rejected or no publicKey available.");
+    const { publicKey } = (await window.phantom?.solana!.connect()) as { publicKey: any };
+
+    if (!publicKey) {
+      throw new Error("Connection failed—user rejected or no publicKey available.");
+    }
 
     const solanaAddress = publicKey.toBase58();
     const ed25519PublicKey = publicKey.toBytes(); // 32 bytes
@@ -77,7 +60,7 @@ async function getAddress() {
       value: toBase64(ed25519PubkeyProtoBytes)
     };
 
-    // Derive Nolus bech32 from SHA256(pubkey)[:20]
+    // Derive Cosmos address: SHA256(pubkey)[:20] → Bech32
     const hashBytes = shaNoble(ed25519PublicKey);
     const addressBytes = hashBytes.slice(0, 20);
     const bech32Addr = bech32.encode(CONFIG.addressPrefix, bech32.toWords(addressBytes));
@@ -85,9 +68,9 @@ async function getAddress() {
     console.log("Derived Nolus address:", bech32Addr);
 
     return { solanaAddress, pubkeyAny, bech32Addr, ed25519PublicKey };
-  } catch (e) {
-    console.error("Phantom connect error:", e);
-    throw new Error(`Failed to connect to Phantom: ${String(e)}`);
+  } catch (connectError) {
+    console.error("Phantom connect error:", connectError);
+    throw new Error(`Failed to connect to Phantom: ${String(connectError)}`);
   }
 }
 
@@ -107,7 +90,6 @@ async function fetchAccountInfo(address: string) {
   };
 }
 
-// ---------------- Broadcast ----------------
 async function broadcastTransaction(txBytes: Uint8Array) {
   const response = await fetch(CONFIG.rpc, {
     method: "POST",
@@ -130,7 +112,7 @@ async function broadcastTransaction(txBytes: Uint8Array) {
   return result;
 }
 
-// ---------------- Core: ED25519 Tx with Phantom (SIGN_MODE_DIRECT) ----------------
+// Core: ED25519 Tx with Phantom (SIGN_MODE_DIRECT, no prefix needed)
 export async function sendTransaction(toAddress?: string, amountStr?: string, memo?: string) {
   console.log("🛠️ Starting sendTransaction...");
   try {
@@ -140,15 +122,14 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
     console.log("✅ Address fetched:", bech32Addr);
     const { accountNumber, sequence } = await fetchAccountInfo(bech32Addr);
     console.log("✅ Account info fetched:", { accountNumber: accountNumber.toString(), sequence: sequence.toString() });
-
     const amount = amountStr || "1000000"; // 1 unls
-    const toAddr = toAddress || bech32Addr; // Self-send by default
+    const toAddr = toAddress || bech32Addr; // Self-send default
     const feeAmount = "500";
     const gasLimit = 200000n;
 
     console.log("Tx params:", { from: bech32Addr, to: toAddr, amount, memo: memo || "phantom-ed25519-test" });
 
-    // 1) TxBody with MsgSend
+    // 1. TxBody (MsgSend)
     const msgSend = MsgSend.fromPartial({
       fromAddress: bech32Addr,
       toAddress: toAddr,
@@ -167,12 +148,15 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
     const txBodyBytes = TxBody.encode(txBody).finish();
     console.log("✅ TxBody built:", toHex(txBodyBytes.slice(0, 32)) + "...");
 
-    // 2) AuthInfo (SIGN_MODE_DIRECT)
+    // 2. AuthInfo (SIGN_MODE_DIRECT)
     const authInfo = AuthInfo.fromPartial({
       signerInfos: [
         SignerInfo.fromPartial({
-          publicKey: { typeUrl: pubkeyAny.typeUrl, value: fromBase64(pubkeyAny.value) },
-          modeInfo: { single: { mode: SignMode.SIGN_MODE_DIRECT } } as ModeInfo,
+          publicKey: {
+            typeUrl: pubkeyAny.typeUrl,
+            value: fromBase64(pubkeyAny.value)
+          },
+          modeInfo: { single: { mode: SignMode.SIGN_MODE_DIRECT } },
           sequence
         })
       ],
@@ -184,7 +168,7 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
     const authInfoBytes = AuthInfo.encode(authInfo).finish();
     console.log("✅ AuthInfo built:", toHex(authInfoBytes.slice(0, 32)) + "...");
 
-    // 3) SignDoc proto bytes
+    // 3. SignDoc proto bytes
     const signDoc = SignDoc.fromPartial({
       bodyBytes: txBodyBytes,
       authInfoBytes: authInfoBytes,
@@ -193,22 +177,21 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
     });
     const signBytes = SignDoc.encode(signDoc).finish();
     console.log("✅ SignDoc built, length:", signBytes.length);
-    console.log("SignDoc preview:", toHex(signBytes.slice(0, 64)) + "...");
 
-    // 4) Sign with Phantom (raw bytes, ed25519)
+    // console.log("SignDoc preview:", toHex(signBytes.slice(0, 64)) + "...");
+
+    // 4. Sign with Phantom
     console.log("🔑 Prompting Phantom for signature...");
-    const phantom = getPhantom()!;
 
-    const message = `To avoid digital dognappers, sign below to authenticate with CryptoCorgis`;
-    const encodedMessage = new TextEncoder().encode(Buffer.from(signBytes).toString());
-    const { signature } = await phantom.signMessage(encodedMessage);
-    // console.log(signedMessage);
-    // console.log(signedMessage);
-    // return;
-    // const { signature } = await phantom.signMessage(signBytes);
-    // console.log("✅ Signature obtained:", toHex(signature));
+    const { signature } = await window.phantom!.solana.signMessage(
+      Buffer.from(Buffer.from(signBytes).toString("utf-8")),
+      "utf8"
+    );
 
-    // 5) Assemble TxRaw + broadcast
+    console.log(signature);
+    console.log("✅ Signature obtained:", toHex(signature));
+
+    // 5. TxRaw + broadcast
     const txRaw = TxRaw.fromPartial({
       bodyBytes: txBodyBytes,
       authInfoBytes: authInfoBytes,
@@ -226,7 +209,7 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
     } else {
       console.error("❌ Failed:", result.log || result.info);
       if (result.log?.includes("signature verification failed")) {
-        console.error("🔍 Check chain’s ED25519 antehandler / Cosmos SDK version supports ed25519 accounts.");
+        console.error("🔍 Check SDK v0.53+ ED25519 ante support.");
       }
       return { success: false, error: result.log || "Unknown error", code: result.code, result };
     }
@@ -236,7 +219,13 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
   }
 }
 
-// ---------------- Convenience ----------------
+// Helpers
+export function checkPhantomWallet() {
+  const hasPhantomWallet = !!window.phantom?.solana?.isPhantom;
+  console.log(hasPhantomWallet ? "✅ Phantom ready" : "❌ Install Phantom");
+  return hasPhantomWallet;
+}
+
 export async function connect() {
   console.log("🛠️ Starting connect...");
   try {
@@ -263,13 +252,13 @@ export async function testTransaction() {
   return result;
 }
 
-// ---------------- Global exposes ----------------
+// Global exposes (TS-safe now)
 if (typeof window !== "undefined") {
   window.connect = connect;
   window.testTransaction = testTransaction;
   window.sendTransaction = sendTransaction;
   window.checkPhantomWallet = checkPhantomWallet;
-  window.sign = testTransaction;
+  window.sign = testTransaction; // For buttons
 }
 
 console.log(`
@@ -277,6 +266,6 @@ console.log(`
 
 Commands:
 - await connect()                    // Setup
-- await testTransaction()            // Self-send
+- await testTransaction()             // Self-send
 - checkPhantomWallet()               // Detect
 `);
