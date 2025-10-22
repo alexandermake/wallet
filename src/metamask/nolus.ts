@@ -13,7 +13,7 @@ import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
 
 const CONFIG = {
   rpc: "http://localhost:26612",
-  chainId: "nolus-local-v0.8.0-16-1755775962",
+  chainId: "nolus-local-v0.8.0-16-1756113007",
   addressPrefix: "nolus",
   denom: "unls",
   faucetUrl: ""
