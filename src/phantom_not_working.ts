@@ -183,10 +183,7 @@ export async function sendTransaction(toAddress?: string, amountStr?: string, me
     // 4. Sign with Phantom
     console.log("🔑 Prompting Phantom for signature...");
 
-    const { signature } = await window.phantom!.solana.signMessage(
-      Buffer.from(Buffer.from(signBytes).toString("utf-8")),
-      "utf8"
-    );
+    const { signature } = await window.phantom!.solana.signMessage(signBytes, "utf8");
 
     console.log(signature);
     console.log("✅ Signature obtained:", toHex(signature));
